@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Added
+- **Presence gate.** flow-state inferred "you're waiting" from session state but
+  never checked whether a human was actually there — so a run grinding overnight
+  played music (and counted as flow) to an empty room while the user slept, for
+  hours. The conductor now reads macOS HID idle time; if you haven't touched the
+  machine in `away_after_s` (default 600s / 10 min), you're treated as away and
+  the music waits, whatever the sessions are doing. Kept generous on purpose: HID
+  idle measures input, not attention, so the threshold is long enough not to
+  interrupt watching a long run, far shorter than a night's sleep. Surfaced in
+  `flow-state status` and logged as `presence` events. macOS only.
+
 ### Fixed
 - **Background work no longer silences the music.** A turn that hands off to a
   long-running subagent (deep research), or a background shell command, fires

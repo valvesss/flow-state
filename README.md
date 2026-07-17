@@ -102,7 +102,8 @@ flow-state set park_after_s 60
 ## How it decides
 
 ```
-play  ⟺  at least one session is working
+play  ⟺  you're at the keyboard
+         AND at least one session is working
          AND no session is waiting on you
 ```
 
@@ -110,6 +111,15 @@ A session is *waiting on you* from the moment it goes idle until `park_after_s`
 later. After that it's *parked* — you already got the pause that announced it,
 and you've visibly moved on, so it stops voting. Without parking, one session
 left open but mentally abandoned would veto the music forever.
+
+**You're at the keyboard** is the presence gate. flow-state infers "you're
+waiting" from session state, but that's blind to whether a human is actually
+there — a run grinding overnight looks identical to one you're watching. So the
+conductor also reads macOS HID idle time: if you haven't touched the machine in
+`away_after_s` (default 10 min), you're away and the music waits, no matter what
+the sessions are doing. It's deliberately generous — HID idle measures input,
+not attention, so the threshold is long enough not to interrupt watching a long
+run, and far shorter than a night's sleep.
 
 ## How it works
 
@@ -216,6 +226,7 @@ an app you didn't open.
 | key | default | |
 |---|---|---|
 | `park_after_s` | `90` | how long silence waits for you |
+| `away_after_s` | `600` | HID idle before you count as away (macOS) |
 | `target_volume` | `"auto"` | learned from your own slider |
 | `fade_in_ms` | `1200` | |
 | `fade_out_ms` | `800` | |

@@ -115,12 +115,24 @@ def cmd_status(args):
         except Exception as e:
             remote_status.append((name, "unreachable (%s)" % type(e).__name__))
 
-    play, reason, counts = state.decide(sessions, cfg.get("park_after_s", 300))
+    play, reason, counts = state.decide(sessions, cfg.get("park_after_s", 90))
+
+    # Presence gate mirrors the conductor: away overrides the session decision.
+    idle = conductor.hid_idle_seconds()
+    away_after = cfg.get("away_after_s", 600)
+    if idle is not None and conductor.is_away(idle, away_after):
+        play = False
+        reason = "you're away (idle %s)" % metrics.human(idle)
+
     st = spotify.player_state()
     np = spotify.now_playing() or {}
 
     print("flow-state: %s" % ("on" if cfg.get("enabled", True) else "OFF (flow-state off)"))
     print("decision  : %s — %s" % ("PLAY" if play else "PAUSE", reason))
+    if idle is not None:
+        print("presence  : %s (idle %s, away after %s)" % (
+            "AWAY" if conductor.is_away(idle, away_after) else "present",
+            metrics.human(idle), metrics.human(away_after)))
     print("sessions  : %d working, %d waiting on you, %d parked"
           % (counts["busy"], counts["waiting"], counts["parked"]))
     print("spotify   : %s%s" % (

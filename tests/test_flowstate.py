@@ -320,6 +320,56 @@ class TestVolumeDrift(unittest.TestCase):
                          "resting volume must survive a burst of interrupted fades")
 
 
+class TestPresence(unittest.TestCase):
+    """Reported from real use: sessions ran overnight, the decision stayed 'play'
+    the whole time, and music played (and counted as flow) for ~5.5h while the
+    user slept. flow-state inferred 'you're waiting' from sessions but never
+    checked whether a human was actually there.
+    """
+
+    def test_present_when_recently_active(self):
+        from flowstate import conductor
+        self.assertFalse(conductor.is_away(30, 600))
+        self.assertFalse(conductor.is_away(599, 600))
+
+    def test_away_past_threshold(self):
+        from flowstate import conductor
+        self.assertTrue(conductor.is_away(600, 600))
+        self.assertTrue(conductor.is_away(5 * 3600, 600), "asleep for hours is away")
+
+    def test_cant_tell_reads_as_present(self):
+        """A missing HID signal (idle_s 0) must never be the reason music stops."""
+        from flowstate import conductor
+        self.assertFalse(conductor.is_away(0, 600))
+
+    def test_hid_parse(self):
+        from flowstate import conductor
+        sample = (
+            '  | {\n    "HIDIdleTime" = 44000000000\n    "HIDkeyboardBacklight" = 0\n  }'
+        )
+        real = conductor.subprocess.run
+        try:
+            class R:
+                stdout = sample
+            conductor.subprocess.run = lambda *a, **k: R()
+            self.assertEqual(conductor.hid_idle_seconds(), 44)
+        finally:
+            conductor.subprocess.run = real
+
+    def test_hid_failure_is_none_not_zero(self):
+        from flowstate import conductor
+        real = conductor.subprocess.run
+
+        def boom(*a, **k):
+            raise OSError("no ioreg")
+        try:
+            conductor.subprocess.run = boom
+            self.assertIsNone(conductor.hid_idle_seconds(),
+                              "a failed read must be None (present), not a bogus number")
+        finally:
+            conductor.subprocess.run = real
+
+
 class TestHook(unittest.TestCase):
     def test_hook_never_raises_on_garbage(self):
         from flowstate import cli

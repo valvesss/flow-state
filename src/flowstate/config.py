@@ -30,6 +30,13 @@ DEFAULTS = {
     # Measure it against your own log rather than trusting this default:
     #     flow-state tune
     "park_after_s": 90,
+    # Presence gate. If you haven't touched the keyboard/mouse in this long, you
+    # are treated as away and the music waits, whatever the sessions are doing --
+    # so a run grinding overnight doesn't play to an empty room (or count as
+    # flow) while you sleep. Kept generous on purpose: HID idle measures input,
+    # not attention, and you might be watching a long run without typing. Long
+    # enough not to interrupt that; far shorter than a night's sleep. macOS only.
+    "away_after_s": 600,
     "poll_ms": 250,
     # Hosts whose sessions also count. name is cosmetic; ssh is an ssh(1) target.
     "remotes": [],

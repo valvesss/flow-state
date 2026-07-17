@@ -6,10 +6,12 @@ every metric shares one clock.
 
 import json
 import os
+import re
+import subprocess
 import sys
 import time
 
-from . import config, events, spotify, state
+from . import config, events, metrics, spotify, state
 from .remote import RemoteWatcher
 
 LEARNED = os.path.join(config.RUN, "learned_volume")
@@ -101,6 +103,40 @@ def relearn_volume(cfg, fader=None):
     return cur
 
 
+_IDLE_RE = re.compile(r'"HIDIdleTime"\s*=\s*(\d+)')
+
+
+def hid_idle_seconds():
+    """Seconds since the last keyboard/mouse input on this Mac, or None.
+
+    This is the presence signal. flow-state infers "you're waiting" from session
+    state, but that is blind to whether *you* are actually here -- a session
+    grinding overnight while you sleep looks identical to one you're watching.
+    HID idle is the ground truth for "is a human at the keyboard".
+
+    None means we can't tell (not macOS, or ioreg failed); callers treat that as
+    "present", because the only host that runs the conductor is the Mac and a
+    missing signal must never be the reason music stops.
+    """
+    try:
+        out = subprocess.run(
+            ["ioreg", "-c", "IOHIDSystem"],
+            capture_output=True, text=True, timeout=4,
+        ).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    m = _IDLE_RE.search(out)
+    if not m:
+        return None
+    return int(m.group(1)) // 1_000_000_000
+
+
+def is_away(idle_s, away_after):
+    """True when the human has been idle at the machine long enough to count as
+    gone. idle_s of 0 (including the can't-tell case) is always present."""
+    return idle_s >= away_after
+
+
 def _key(s):
     return "%s/%s" % (s.get("host", "local"), s.get("session"))
 
@@ -139,6 +175,9 @@ def run(once=False):
     prev = {}
     playing = None  # our belief about whether *we* have it playing
     last_enabled = None
+    away = None            # our belief about whether the human has stepped away
+    idle_s = 0             # last HID idle reading
+    idle_checked_at = 0.0  # throttle: reading ioreg every poll is wasteful
 
     try:
         while True:
@@ -177,8 +216,29 @@ def run(once=False):
             prev = cur
 
             play, reason, counts = state.decide(
-                sessions, cfg.get("park_after_s", 300)
+                sessions, cfg.get("park_after_s", 90)
             )
+
+            # Presence gate. No matter what the sessions say, don't play to an
+            # empty room: if the human hasn't touched the machine in a while,
+            # they've stepped away (or fallen asleep) and the music should wait.
+            away_after = cfg.get("away_after_s", 600)
+            now_t = time.time()
+            if now_t - idle_checked_at >= 2:
+                idle = hid_idle_seconds()
+                idle_s = idle if idle is not None else 0
+                idle_checked_at = now_t
+            gone = is_away(idle_s, away_after)  # can't-tell => idle_s 0 => present
+            if gone != away and away is not None:
+                events.emit("presence", state="away" if gone else "back",
+                            idle_s=idle_s)
+                _log("presence: %s (idle %s)" % (
+                    "away" if gone else "back", metrics.human(idle_s)))
+            away = gone
+
+            if gone:
+                play = False
+                reason = "you're away (idle %s)" % metrics.human(idle_s)
 
             if play != playing:
                 rest = resting_volume(cfg)
