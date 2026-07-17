@@ -211,6 +211,12 @@ def run(once=False):
                     host=s.get("host", "local"),
                     session=s.get("session"),
                     project=s.get("project", ""),
+                    # bg>0 means this state is held by background work (a subagent
+                    # or background shell), not a live prompt. This is the field
+                    # that lets you tell a real handoff from a background run
+                    # after the fact -- the exact distinction behind the
+                    # "deep research went silent" false positive.
+                    bg=s.get("bg", 0),
                     **{"from": frm, "to": to}
                 )
             prev = cur

@@ -320,6 +320,74 @@ class TestVolumeDrift(unittest.TestCase):
                          "resting volume must survive a burst of interrupted fades")
 
 
+class TestEventSchema(unittest.TestCase):
+    def test_every_event_carries_version_and_bg_capable(self):
+        from flowstate import events
+        rec = events.emit("transition", host="local", session="x", bg=2,
+                          **{"from": "idle", "to": "busy"})
+        self.assertEqual(rec["v"], events.SCHEMA)
+        self.assertEqual(rec["bg"], 2, "transitions must be able to carry the bg flag")
+
+
+class TestMetricsOutliersAndAway(unittest.TestCase):
+    """#2: stop dropping outliers silently, and don't count sleep as response."""
+
+    def setUp(self):
+        open(config.EVENTS, "w").close()
+
+    def _log(self, recs):
+        with open(config.EVENTS, "w") as f:
+            for r in recs:
+                f.write(json.dumps(r) + "\n")
+
+    def test_long_gap_is_kept_as_outlier_not_dropped(self):
+        t = 10_000.0
+        big = metrics.MAX_RESPONSE + 3600
+        self._log([
+            {"ts": t, "ev": "transition", "host": "local", "session": "a",
+             "project": "p", "from": None, "to": "idle"},
+            {"ts": t + big, "ev": "transition", "host": "local", "session": "a",
+             "project": "p", "from": "idle", "to": "busy"},
+        ])
+        m = metrics.compute(since=t - 1, park_after_s=PARK, now=t + big + 1)
+        r = m["response"]
+        self.assertEqual(r["count"], 0, "a huge gap must not be a typical response")
+        self.assertEqual(r["outliers"], 1, "but it must be KEPT and surfaced, not dropped")
+        self.assertAlmostEqual(r["outlier_max"], big, delta=1)
+
+    def test_gap_while_away_is_not_a_response(self):
+        t = 10_000.0
+        self._log([
+            {"ts": t, "ev": "transition", "host": "local", "session": "a",
+             "project": "p", "from": None, "to": "idle"},
+            {"ts": t + 20, "ev": "presence", "state": "away", "idle_s": 600},
+            {"ts": t + 5000, "ev": "presence", "state": "back", "idle_s": 4900},
+            {"ts": t + 5000, "ev": "transition", "host": "local", "session": "a",
+             "project": "p", "from": "idle", "to": "busy"},
+        ])
+        m = metrics.compute(since=t - 1, park_after_s=PARK, now=t + 5001)
+        r = m["response"]
+        self.assertEqual(r["count"], 0)
+        self.assertEqual(r["away_gaps"], 1, "the sleep gap is 'away', not a 1h23m response")
+        self.assertEqual(r["outliers"], 0)
+        self.assertGreater(m["away_time"], 4000, "away time is reported honestly")
+
+    def test_normal_response_still_measured(self):
+        t = 10_000.0
+        self._log([
+            {"ts": t, "ev": "transition", "host": "local", "session": "a",
+             "project": "p", "from": None, "to": "idle"},
+            {"ts": t + 40, "ev": "transition", "host": "local", "session": "a",
+             "project": "p", "from": "idle", "to": "busy"},
+        ])
+        m = metrics.compute(since=t - 1, park_after_s=PARK, now=t + 41)
+        r = m["response"]
+        self.assertEqual(r["count"], 1)
+        self.assertAlmostEqual(r["median"], 40, places=3)
+        self.assertEqual(r["outliers"], 0)
+        self.assertEqual(r["away_gaps"], 0)
+
+
 class TestPresence(unittest.TestCase):
     """Reported from real use: sessions ran overnight, the decision stayed 'play'
     the whole time, and music played (and counted as flow) for ~5.5h while the

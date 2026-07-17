@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Changed
+- **Event log is instrumented for after-the-fact analysis.** Three changes so
+  the log can answer "was that a false positive?" and "what were the outliers?":
+  - Every event carries a schema version (`v`), so decisions stay attributable
+    when the rule changes.
+  - `transition` events record `bg` — whether the state was held by background
+    work (a subagent, a background shell) rather than a live prompt. This is the
+    field that distinguishes a real handoff from a background run after the fact.
+  - Metrics stop dropping outliers silently. Long idle gaps and gaps you were
+    away for are split into their own buckets and surfaced (`outliers`,
+    `away_gaps`, `p99`, `max`, `away_time`) instead of vanishing from the
+    typical stats. `flow-state stats` shows what it set aside.
+
 ### Added
 - **Presence gate.** flow-state inferred "you're waiting" from session state but
   never checked whether a human was actually there — so a run grinding overnight

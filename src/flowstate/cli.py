@@ -184,10 +184,22 @@ def cmd_stats(args):
     print("  %-22s %s" % ("Claude waited on you", h(m["attention_time"])))
     print("  %-22s %s" % ("longest unbroken flow", h(m["longest_flow"])))
     print("  %-22s %d across %d sessions" % ("turns", m["turns"], m["sessions_seen"]))
+    if m.get("away_time"):
+        print("  %-22s %s" % ("away from keyboard", h(m["away_time"])))
     r = m["response"]
     if r["count"]:
-        print("  %-22s %s median · %s p90 (n=%d)"
-              % ("your response time", h(r["median"]), h(r["p90"]), r["count"]))
+        print("  %-22s %s median · %s p90 · %s max (n=%d)"
+              % ("your response time", h(r["median"]), h(r["p90"]), h(r["max"]), r["count"]))
+        # Never hide truncation: if long gaps or away-gaps were set aside, say so.
+        notes = []
+        if r.get("outliers"):
+            notes.append("%d outlier%s up to %s"
+                         % (r["outliers"], "" if r["outliers"] == 1 else "s", h(r["outlier_max"])))
+        if r.get("away_gaps"):
+            notes.append("%d gap%s while away"
+                         % (r["away_gaps"], "" if r["away_gaps"] == 1 else "s"))
+        if notes:
+            print("  %-22s set aside: %s" % ("", " · ".join(notes)))
     if m["projects"]:
         print("\n  by project")
         for p in m["projects"][:6]:

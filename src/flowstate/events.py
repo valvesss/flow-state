@@ -12,9 +12,13 @@ import time
 
 from . import config
 
+# Bumped when the meaning of a field changes, so analysis can tell events
+# written under one decision rule from another. Absent `v` means pre-versioning.
+SCHEMA = 1
+
 
 def emit(ev, **fields):
-    rec = {"ts": round(time.time(), 3), "ev": ev}
+    rec = {"v": SCHEMA, "ts": round(time.time(), 3), "ev": ev}
     rec.update(fields)
     try:
         os.makedirs(config.ROOT, exist_ok=True)

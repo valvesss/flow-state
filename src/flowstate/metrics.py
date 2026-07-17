@@ -80,15 +80,51 @@ def compute(since=None, park_after_s=300, now=None):
         lane["turns"] = sum(1 for _, st in pts if st == "busy")
         del lane["points"]
 
+    # --- presence: intervals you were away (from presence events) ---------
+    away_intervals = []
+    open_away = None
+    for e in log:
+        if e.get("ev") != "presence":
+            continue
+        if e.get("state") == "away" and open_away is None:
+            open_away = e["ts"]
+        elif e.get("state") == "back" and open_away is not None:
+            away_intervals.append((open_away, e["ts"]))
+            open_away = None
+    if open_away is not None:
+        away_intervals.append((open_away, now))
+
+    def _during_away(a, b):
+        return any(a < y and x < b for x, y in away_intervals)
+
+    away_time = 0.0
+    for x, y in away_intervals:
+        lo, hi = max(x, window_start), min(y, now)
+        if hi > lo:
+            away_time += hi - lo
+
     # --- response latency: idle -> busy on the same session ---------------
-    responses = []
+    # Three buckets instead of one. A gap the user was away for is not a
+    # response; a gap far too long to be one (but with no away signal, e.g.
+    # older data) is an outlier we KEEP and expose rather than drop silently --
+    # dropping it made the log say "covered everything" when it hadn't.
+    responses, outliers = [], []
+    away_gaps = 0
     for lane in lanes.values():
         for s in lane["spans"]:
-            if s["state"] == "idle" and s["end"] < now:
-                d = s["end"] - s["start"]
-                if 0 < d <= MAX_RESPONSE:
-                    responses.append(d)
+            if s["state"] != "idle" or s["end"] >= now:
+                continue
+            d = s["end"] - s["start"]
+            if d <= 0:
+                continue
+            if _during_away(s["start"], s["end"]):
+                away_gaps += 1
+            elif d > MAX_RESPONSE:
+                outliers.append(d)
+            else:
+                responses.append(d)
     responses.sort()
+    outliers.sort()
 
     # --- attention time: sweep with synthetic park boundaries -------------
     # A session parks mid-interval (park_after_s after it went idle), so park
@@ -148,11 +184,19 @@ def compute(since=None, park_after_s=300, now=None):
         "flow_blocks": [{"start": a, "end": b} for a, b in flow_blocks],
         "turns": sum(lane["turns"] for lane in lanes.values()),
         "sessions_seen": len(lanes),
+        "away_time": away_time,
         "response": {
             "count": len(responses),
             "median": _pct(responses, 0.5),
             "p90": _pct(responses, 0.9),
+            "p99": _pct(responses, 0.99),
+            "max": responses[-1] if responses else 0.0,
             "total": sum(responses),
+            # kept, not dropped: long gaps that skew the typical stats, and gaps
+            # you were away for. Exposed so truncation is never silent.
+            "outliers": len(outliers),
+            "outlier_max": outliers[-1] if outliers else 0.0,
+            "away_gaps": away_gaps,
         },
         "lanes": sorted(lanes.values(), key=lambda lane: -lane["busy_time"]),
         "projects": projects,
