@@ -51,7 +51,25 @@ PARK_CHANCE = 0.15        # sometimes you leave one and focus elsewhere
 PARK_S = (200, 600)
 
 
+def _guard_home():
+    """Refuse to write demo events into a real install.
+
+    config.EVENTS defaults to ~/.flow-state when FLOW_STATE_HOME is unset, so a
+    bare `python3 scripts/demo-data.py` would clobber a real log with mock
+    tracks. Require an explicit, non-default home.
+    """
+    home = os.environ.get("FLOW_STATE_HOME")
+    real = os.path.join(os.path.expanduser("~"), ".flow-state")
+    if not home or os.path.abspath(home) == os.path.abspath(real):
+        sys.stderr.write(
+            "refusing to write demo data into your real log.\n"
+            "set a throwaway home first, e.g.:\n"
+            "    FLOW_STATE_HOME=/tmp/fs-demo python3 scripts/demo-data.py\n")
+        raise SystemExit(2)
+
+
 def main():
+    _guard_home()
     rnd = random.Random(11)
     now = time.time()
     start = now - HOURS * 3600
