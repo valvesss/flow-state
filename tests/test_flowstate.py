@@ -403,6 +403,54 @@ class TestMetricsOutliersAndAway(unittest.TestCase):
         self.assertEqual(m["stale_busy_count"], 0, "bg>0 is real work, never stale")
         self.assertGreater(m["projects"][0]["busy_time"], 2 * metrics.HOUR)
 
+    def test_flow_straddling_window_start_is_counted(self):
+        """Reviewer #1: a flow block that began before `since` but is still going
+        inside the window must count its in-window portion, not zero."""
+        t = 10_000.0
+        self._log([
+            {"ts": t, "ev": "music", "action": "play"},
+            {"ts": t + 7200, "ev": "music", "action": "pause"},
+        ])
+        m = metrics.compute(since=t + 3600, park_after_s=PARK, now=t + 7200)
+        self.assertAlmostEqual(m["flow_time"], 3600, delta=1,
+                               msg="in-window half of a straddling flow block must count")
+
+    def test_busy_straddling_window_start_is_counted(self):
+        t = 10_000.0  # busy span 2000s (< STALE_BUSY) so it isn't flagged stuck
+        self._log([
+            {"ts": t, "ev": "transition", "host": "h", "session": "a",
+             "project": "p", "from": "idle", "to": "busy", "bg": 0},
+            {"ts": t + 2000, "ev": "transition", "host": "h", "session": "a",
+             "project": "p", "from": "busy", "to": "idle", "bg": 0},
+        ])
+        m = metrics.compute(since=t + 500, park_after_s=PARK, now=t + 2000)
+        self.assertAlmostEqual(m["projects"][0]["busy_time"], 1500, delta=1,
+                               msg="busy that started before the window still counts in-window")
+
+    def test_closing_a_session_is_not_a_response(self):
+        """Reviewer #2: idle -> gone (closing a finished window) must not be
+        counted as 'you responded in Ns'."""
+        t = 10_000.0
+        self._log([
+            {"ts": t, "ev": "transition", "host": "h", "session": "a",
+             "project": "p", "from": "busy", "to": "idle", "bg": 0},
+            {"ts": t + 50, "ev": "transition", "host": "h", "session": "a",
+             "project": "p", "from": "idle", "to": "gone", "bg": 0},
+        ])
+        m = metrics.compute(since=t - 1, park_after_s=PARK, now=t + 100)
+        self.assertEqual(m["response"]["count"], 0,
+                         "closing a session is not responding to it")
+
+    def test_missing_ts_line_does_not_crash(self):
+        """Reviewer #5: a valid-JSON event without ts must be skipped, not crash."""
+        with open(config.EVENTS, "w") as f:
+            f.write(json.dumps({"ev": "transition", "to": "busy"}) + "\n")
+            f.write(json.dumps({"ts": 10_000.0, "ev": "transition", "host": "h",
+                                "session": "a", "project": "p",
+                                "from": None, "to": "busy", "bg": 0}) + "\n")
+        m = metrics.compute(since=None, park_after_s=PARK, now=10_050.0)
+        self.assertEqual(m["turns"], 1)
+
     def test_the_day_partitions_the_window(self):
         """The Kickbacks lesson: count once, no overlap. flow+waiting+away+idle
         must equal the window, so the breakdown actually reconciles."""

@@ -22,6 +22,23 @@
     never touched.
 
 ### Fixed
+- **Window edges are no longer wrong.** Metrics filtered the event log to
+  `[since, now]` at read time, so a flow block or busy span that began before
+  the window but was still going inside it counted as **zero** — the 1h/6h
+  presets (the dashboard defaults) undercounted anything ongoing. Metrics now
+  read full history and clip each quantity to the window; activity straddling
+  the start counts its in-window portion.
+- **Closing a session no longer fakes a response time.** An `idle -> gone`
+  (closing a finished Claude window) was counted as "you responded in Ns",
+  skewing the median and inflating `n`. Only `idle -> busy` (you came back and
+  dispatched) counts now.
+- **`uninstall-hooks` writes settings safely** — backup + temp-file + atomic
+  replace, mirroring `install-hooks`, so an interrupted removal can't corrupt
+  `~/.claude/settings.json`.
+- Corrupt event-log lines (valid JSON but missing `ts`) are skipped instead of
+  crashing `stats`/the dashboard. Remote `bg` changes push immediately instead
+  of waiting for the heartbeat. `park_after_s` default unified to 90 everywhere
+  (was 300 at some fallbacks). Dead metric keys removed.
 - **Swimlane no longer buried under empty lanes.** The SSH-bridge spawns many
   ephemeral sessions that only ever go `idle->gone`; each got its own lane,
   drowning the real ones under dozens of blank rows. The timeline now shows only

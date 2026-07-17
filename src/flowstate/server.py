@@ -57,10 +57,10 @@ class Handler(BaseHTTPRequestHandler):
             qs = parse_qs(u.query)
             cfg = config.load()
             m = metrics.compute(
-                since=_since(qs), park_after_s=cfg.get("park_after_s", 300)
+                since=_since(qs), park_after_s=cfg.get("park_after_s", 90)
             )
             sessions = state.read_all(host="local")
-            play, reason, counts = state.decide(sessions, cfg.get("park_after_s", 300))
+            play, reason, counts = state.decide(sessions, cfg.get("park_after_s", 90))
             m["now"] = {
                 "play": play,
                 "reason": reason,
@@ -68,7 +68,7 @@ class Handler(BaseHTTPRequestHandler):
                 "enabled": cfg.get("enabled", True),
                 "spotify": spotify.player_state(),
                 "track": spotify.now_playing(),
-                "park_after_s": cfg.get("park_after_s", 300),
+                "park_after_s": cfg.get("park_after_s", 90),
             }
             return self._send(
                 200, json.dumps(m), "application/json; charset=utf-8"

@@ -299,7 +299,9 @@ def watch(poll_ms=250, heartbeat=10):
         )
         ordered = sorted(sessions, key=lambda x: x["session"])
         fingerprint = json.dumps(
-            [(s["session"], s["state"], s.get("since")) for s in ordered],
+            # include bg: a remote session flipping to/from background work while
+            # staying "busy" must push immediately, not wait for the heartbeat.
+            [(s["session"], s["state"], s.get("since"), s.get("bg", 0)) for s in ordered],
             sort_keys=True,
         )
         now = time.time()

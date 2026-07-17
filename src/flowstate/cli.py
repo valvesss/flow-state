@@ -172,7 +172,7 @@ def _parse_since(s):
 def cmd_stats(args):
     cfg = config.load()
     m = metrics.compute(
-        since=_parse_since(args.since), park_after_s=cfg.get("park_after_s", 300)
+        since=_parse_since(args.since), park_after_s=cfg.get("park_after_s", 90)
     )
     if args.json:
         print(json.dumps(m, indent=2))
@@ -377,8 +377,15 @@ def cmd_uninstall_hooks(args):
             hooks.pop(ev)
     if not hooks:
         settings.pop("hooks", None)
-    with open(path, "w") as f:
+    # Mirror install-hooks' safety: back up, then write via tmp + atomic replace,
+    # so a crash or full disk mid-write can't corrupt the real settings file.
+    backup = path + ".flow-state-backup"
+    with open(path) as a, open(backup, "w") as b:
+        b.write(a.read())
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
         json.dump(settings, f, indent=2)
+    os.replace(tmp, path)
     print("removed flow-state hooks from: %s" % (", ".join(sorted(set(removed))) or "nothing"))
     return 0
 
