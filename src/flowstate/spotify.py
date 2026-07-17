@@ -125,6 +125,18 @@ class Fader:
         self._proc = None
         self._lock = threading.Lock()
 
+    def in_flight(self):
+        """True while a fade's osascript is still ramping the volume.
+
+        A volume read taken now is a point on the ramp, not a resting value --
+        e.g. one third through a fade-in the perceptual curve is only at ~9.
+        relearn_volume uses this to refuse to 'learn' a mid-ramp reading, which
+        is what once walked the resting volume down to single digits.
+        """
+        with self._lock:
+            p = self._proc
+        return p is not None and p.poll() is None
+
     def _cancel(self):
         with self._lock:
             p, self._proc = self._proc, None

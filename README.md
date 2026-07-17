@@ -112,7 +112,7 @@ events; flow-state registers five of them:
 |---|---|
 | `SessionStart` | register, idle |
 | `UserPromptSubmit` | **busy** — you dispatched work |
-| `Stop` | **idle** — turn over, your move |
+| `Stop` | turn over — **idle**, *unless* background work is still running |
 | `Notification` | **idle** — wants permission or input |
 | `SessionEnd` | deregister |
 
@@ -121,9 +121,19 @@ code is ignored. That matters more than it sounds: a `Stop` hook that exits
 non-zero *blocks the turn from ending*. No music feature is worth wedging a
 session over, so the hook is fire-and-forget and swallows everything.
 
+**A turn ending is not the same as Claude being done.** When a turn hands off to
+a long-running subagent (a deep-research sweep) or a background shell command,
+`Stop` fires *immediately* while the work grinds on for minutes — and that's the
+purest case of you having nothing to do. So `Stop` doesn't blindly mean idle: it
+reads the `background_tasks` in its own payload and keeps the session **working**
+while anything there is still `running`. When that finishes, the harness
+re-invokes the session and another `Stop` fires with the list drained — that one
+is the real cue.
+
 `SubagentStop` is deliberately **not** hooked — it carries the *parent's*
 `session_id`, so hooking it would mark a live session idle every time a subagent
-finished.
+finished. (The `background_tasks` field on `Stop` gives us the same information
+without that footgun.)
 
 Each hook writes one small JSON file per session. Every writer touches only its
 own path, so parallel sessions never contend and no lock is needed — the

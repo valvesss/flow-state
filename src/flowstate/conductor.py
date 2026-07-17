@@ -71,20 +71,32 @@ def resting_volume(cfg):
     return cur if cur and cur > 5 else 60
 
 
-def relearn_volume(cfg):
+def relearn_volume(cfg, fader=None):
     """Update the learned resting volume iff *you* moved the slider.
 
     Called just before we ramp to zero, since that is the last moment the
     volume still reflects what you were listening at.
+
+    Two ways a naive read lies, both learned the hard way on real hardware:
+
+      * Mid-fade. If a fade is still ramping, the reading is a point on the
+        curve, not a resting level -- a third of the way into a fade-in that is
+        ~9. Believing it walks the resting volume down to single digits over a
+        burst of rapid pause/play flips. So we refuse to learn while in flight.
+      * Quantisation. Spotify's scale loses a point on every set/read round
+        trip, so a reading within QUANTISATION_SLOP of the learned value is our
+        own rounding noise, not a decision you made.
     """
     if cfg.get("target_volume", "auto") != "auto":
         return None
+    if fader is not None and fader.in_flight():
+        return _read_learned()  # a fade is ramping; this read is not a resting level
     cur = spotify.volume()
     if not cur or cur <= 5:
-        return None
+        return _read_learned()
     learned = _read_learned()
     if learned is not None and abs(cur - learned) <= QUANTISATION_SLOP:
-        return learned  # our own rounding noise, not a decision you made
+        return learned
     _write_learned(cur)
     return cur
 
@@ -181,7 +193,7 @@ def run(once=False):
                 else:
                     # Relearn before ramping to zero: this is the last moment
                     # the slider still reflects what you were listening at.
-                    rest = relearn_volume(cfg) or rest
+                    rest = relearn_volume(cfg, fader) or rest
                     np = spotify.now_playing() or {}
                     ok = fader.fade_out(rest, cfg.get("fade_out_ms", 800))
                     events.emit(

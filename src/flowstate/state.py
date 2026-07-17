@@ -174,7 +174,9 @@ def decide(sessions, park_after_s, now=None):
 
     play = bool(busy) and not waiting
     if play:
-        reason = "%d working, nothing waiting on you" % len(busy)
+        bg = sum(1 for s in busy if s.get("bg"))
+        reason = "%d working%s, nothing waiting on you" % (
+            len(busy), " (%d in background)" % bg if bg else "")
     elif waiting:
         reason = "waiting on you: " + ", ".join(
             (w.get("project") or str(w.get("session", ""))[:8]) for w in waiting[:3]

@@ -190,6 +190,7 @@
   <p class="tagline">Music while Claude works. Silence means it's your move.</p>
 
   <div class="ranges" id="ranges">
+    <button data-since="1h">1h</button>
     <button data-since="6h">6h</button>
     <button data-since="24h" aria-pressed="true">24h</button>
     <button data-since="7d">7d</button>
@@ -232,8 +233,14 @@
 <script>
 const $ = s => document.querySelector(s);
 const tip = $('#tip');
-let since = '24h';
 let loaded = false;
+
+// ?theme=dark|light forces a mode; otherwise follow the OS. ?since=6h presets
+// the range. Both exist so the page can be captured or linked deterministically.
+const qs = new URLSearchParams(location.search);
+const qsTheme = qs.get('theme');
+if (qsTheme === 'dark' || qsTheme === 'light') document.documentElement.dataset.theme = qsTheme;
+let since = qs.get('since') || '24h';
 
 function human(s) {
   s = Math.max(0, Math.round(s || 0));
@@ -419,6 +426,10 @@ $('#ranges').addEventListener('click', e => {
     x.setAttribute('aria-pressed', String(x === b)));
   load();
 });
+
+// reflect ?since= in the filter row
+[...$('#ranges').children].forEach(b =>
+  b.setAttribute('aria-pressed', String(b.dataset.since === since)));
 
 load();
 setInterval(load, 5000);

@@ -10,19 +10,49 @@ import time
 from . import config, conductor, events, metrics, spotify, state
 
 # What each hook event means about the session that fired it.
-#   Stop         -- the turn ended. Whether Claude finished or parked itself on a
-#                   background task, it is now your move. This is the pause.
-#   Notification -- it wants permission or input. Also your move.
+#   Notification -- it wants permission or input. Your move.
+#   Stop         -- the turn ended, but see _stop_state below: that does NOT
+#                   reliably mean your move.
 # SubagentStop is deliberately absent: it carries the *parent's* session_id, so
 # hooking it would mark a session idle every time an Explore agent finished.
 EVENT_STATE = {
     "SessionStart": state.IDLE,
     "UserPromptSubmit": state.BUSY,
-    "Stop": state.IDLE,
     "Notification": state.IDLE,
 }
 
 HOOK_EVENTS = ["SessionStart", "UserPromptSubmit", "Stop", "Notification", "SessionEnd"]
+
+
+def _stop_state(payload):
+    """A turn ending is not the same as Claude being done.
+
+    When a turn hands off to background work -- a subagent, a deep research
+    sweep, a long-running background command -- `Stop` fires immediately while
+    the work grinds on for minutes. Treating that as "your move" is exactly
+    backwards: it is the purest case of you having nothing to do, and the naive
+    reading silences the music for the entire run.
+
+    `Stop`'s payload carries `background_tasks` (undocumented at time of
+    writing, verified on the wire), each entry with a `status`. Anything still
+    `running` means the session is still working:
+
+        [{"id": "...", "type": "subagent", "status": "running",
+          "description": "Probe hook payloads", "agent_type": "Explore"}]
+
+    When that work finishes the harness re-invokes the session, so another
+    `Stop` follows with the list drained -- and that one is the real cue.
+    """
+    running = [
+        t for t in (payload.get("background_tasks") or [])
+        if isinstance(t, dict) and t.get("status") == "running"
+    ]
+    if not running:
+        return state.IDLE, {"bg": 0}
+    return state.BUSY, {
+        "bg": len(running),
+        "bg_desc": str(running[0].get("description") or running[0].get("type") or "")[:60],
+    }
 
 
 def cmd_hook(args):
@@ -44,8 +74,11 @@ def cmd_hook(args):
             return 0
         if ev == "SessionEnd":
             state.remove(sid)
+        elif ev == "Stop":
+            st, extra = _stop_state(payload)
+            state.write(sid, st, cwd=payload.get("cwd"), extra=extra)
         elif ev in EVENT_STATE:
-            state.write(sid, EVENT_STATE[ev], cwd=payload.get("cwd"))
+            state.write(sid, EVENT_STATE[ev], cwd=payload.get("cwd"), extra={"bg": 0})
     except Exception:
         pass
     return 0
@@ -102,10 +135,13 @@ def cmd_status(args):
         for s in sorted(sessions, key=lambda x: x.get("since", 0)):
             age = now - s.get("since", now)
             mark = "▶" if s["state"] == "busy" else (
-                "⏸" if age < cfg.get("park_after_s", 300) else "·")
-            print("  %s %-6s %-10s %-22s %s ago" % (
+                "⏸" if age < cfg.get("park_after_s", 90) else "·")
+            note = ""
+            if s.get("bg"):
+                note = "  ⋯ background: %s" % (s.get("bg_desc") or "%d task(s)" % s["bg"])
+            print("  %s %-6s %-10s %-22s %s ago%s" % (
                 mark, s["state"], s.get("host", "local"),
-                (s.get("project") or "")[:22], metrics.human(age)))
+                (s.get("project") or "")[:22], metrics.human(age), note))
     return 0
 
 

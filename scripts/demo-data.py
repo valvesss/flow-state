@@ -4,6 +4,15 @@
     FLOW_STATE_HOME=/tmp/fs-demo python3 scripts/demo-data.py
     FLOW_STATE_HOME=/tmp/fs-demo bin/flow-state dash
 
+This is an event-driven simulation: every session keeps its own next-event time
+and they are processed in time order, so turns genuinely overlap the way five
+parallel sessions do. Advancing one global clock per session in a loop would
+serialise them -- the last session in each round would sit idle for as long as
+all the others took, which both looks wrong and badly understates flow time.
+
+Music events are produced by calling the real `state.decide`, not by guessing,
+so the demo cannot drift away from the shipped rule.
+
 Never writes to the default home unless you point it there deliberately.
 """
 
@@ -17,69 +26,103 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
 from flowstate import config, state  # noqa: E402
 
 SESSIONS = [
-    ("web", "local"), ("api", "build-box"), ("infra", "build-box"),
-    ("cli", "build-box"), ("docs", "build-box"),
+    ("web", "local"),
+    ("api", "build-box"),
+    ("infra", "build-box"),
+    ("cli", "build-box"),
+    ("docs", "build-box"),
 ]
+
 TRACKS = [
-    ("Track One", "Some Band"), ("Track Two", "Another Band"),
-    ("Track Three", "A Third Band"), ("Track Four", "Yet Another Band"),
-    ("Track Five", "The Fifth Band"), ("Track Six", "Band Six"),
+    ("Take It Easy", "Eagles"),
+    ("The Weight", "The Band"),
+    ("Rhiannon", "Fleetwood Mac"),
+    ("Ramble On", "Led Zeppelin"),
+    ("Southern Cross", "Crosby, Stills & Nash"),
+    ("Tuesday's Gone", "Lynyrd Skynyrd"),
 ]
+
+HOURS = 6
+PARK_AFTER = 90
+
+TURN_S = (150, 700)       # how long a turn runs
+ANSWER_S = (20, 200)      # how fast you get back to a session
+PARK_CHANCE = 0.15        # sometimes you leave one and focus elsewhere
+PARK_S = (200, 600)
 
 
 def main():
-    rnd = random.Random(7)
+    rnd = random.Random(11)
     now = time.time()
-    start = now - 5 * 3600
-    out, music_on, t = [], False, start
+    start = now - HOURS * 3600
+    host_of = dict(SESSIONS)
 
-    lanes = {name: {"state": None, "t": start + rnd.uniform(0, 600)} for name, _ in SESSIONS}
+    out = []
+    live, since = {}, {}
+    music_on = False
 
     def emit(ts, **kw):
         out.append(dict(ts=round(ts, 3), **kw))
 
-    events_q = []
-    for name, host in SESSIONS:
-        t0 = lanes[name]["t"]
-        while t0 < now:
-            events_q.append((t0, name, host, "busy"))
-            t0 += rnd.uniform(60, 420)          # a turn
-            if t0 >= now:
-                break
-            events_q.append((t0, name, host, "idle"))
-            t0 += rnd.uniform(20, 900)          # you, getting back to it
-    events_q.sort()
-
-    live = {}
-    for ts, name, host, st in events_q:
-        prev = live.get(name)
-        emit(ts, ev="transition", host=host, session="demo-" + name,
-             project=name, **{"from": prev, "to": st})
-        live[name] = st
-
+    def settle(ts):
+        """Ask the real rule what the music should be doing, and log it."""
+        nonlocal music_on
         sessions = [
-            {"session": n, "state": s, "since": ts, "project": n}
+            {"session": n, "state": s, "since": since[n], "project": n}
             for n, s in live.items()
         ]
-        # recompute `since` honestly so parking behaves
-        sessions = []
-        for n, s in live.items():
-            last = max((e["ts"] for e in out
-                        if e.get("ev") == "transition" and e.get("project") == n), default=ts)
-            sessions.append({"session": n, "state": s, "since": last, "project": n})
-
-        play, reason, counts = state.decide(sessions, 300, now=ts)
+        play, reason, counts = state.decide(sessions, PARK_AFTER, now=ts)
         if play != music_on:
             tr, ar = rnd.choice(TRACKS)
             emit(ts, ev="music", action="play" if play else "pause",
                  reason=reason, volume=79, ok=True, track=tr, artist=ar, **counts)
             music_on = play
 
-    root = config.ROOT
-    os.makedirs(root, exist_ok=True)
+    emit(start, ev="conductor", action="start", remotes=["build-box"])
+
+    # every session starts idle, staggered, with its own next-event clock
+    next_at = {}
+    for name, _ in SESSIONS:
+        t0 = start + rnd.uniform(0, 90)
+        live[name], since[name] = "idle", t0
+        emit(t0, ev="transition", host=host_of[name], session="demo-" + name,
+             project=name, **{"from": None, "to": "idle"})
+        next_at[name] = t0 + rnd.uniform(*ANSWER_S)
+
+    # process in time order: sessions overlap, as they actually do
+    while True:
+        name = min(next_at, key=next_at.get)
+        t = next_at[name]
+        if t >= now:
+            break
+
+        nxt = "busy" if live[name] == "idle" else "idle"
+        emit(t, ev="transition", host=host_of[name], session="demo-" + name,
+             project=name, **{"from": live[name], "to": nxt})
+        live[name], since[name] = nxt, t
+        settle(t)
+
+        if nxt == "busy":
+            next_at[name] = t + rnd.uniform(*TURN_S)
+        elif rnd.random() < PARK_CHANCE:
+            next_at[name] = t + rnd.uniform(*PARK_S)     # you leave it parked
+        else:
+            next_at[name] = t + rnd.uniform(*ANSWER_S)   # you answer it
+
+        # a parked session crossing its boundary changes the decision even
+        # though no session transitioned -- give the rule a chance to notice
+        for other, ts in list(since.items()):
+            if live[other] == "idle" and t < ts + PARK_AFTER < min(next_at.values()):
+                settle(ts + PARK_AFTER)
+
+    settle(now)
+
+    os.makedirs(config.ROOT, exist_ok=True)
+    out.sort(key=lambda e: e["ts"])
     with open(config.EVENTS, "w") as f:
         for e in out:
-            f.write(json.dumps(e, separators=(",", ":")) + "\n")
+            if start <= e["ts"] <= now:
+                f.write(json.dumps(e, separators=(",", ":")) + "\n")
     print("wrote %d events to %s" % (len(out), config.EVENTS))
 
 

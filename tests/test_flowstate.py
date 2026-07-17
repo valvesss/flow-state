@@ -275,8 +275,49 @@ class TestVolumeDrift(unittest.TestCase):
         cfg = {"target_volume": "auto"}
         self.c._write_learned(79)
         spotify.volume = lambda: 0
-        self.assertIsNone(self.c.relearn_volume(cfg))
+        self.assertEqual(self.c.relearn_volume(cfg), 79)
         self.assertEqual(self.c._read_learned(), 79)
+
+    def test_mid_fade_read_is_not_learned(self):
+        """The vol=9 bug: a session flips idle mid fade-in, the volume read is a
+        low point on the perceptual ramp, and it must NOT become the resting
+        level. Reproduced from real use where resting walked down to 9.
+        """
+        cfg = {"target_volume": "auto"}
+        self.c._write_learned(75)
+
+        class FakeFader:
+            def __init__(self): self.flying = True
+            def in_flight(self): return self.flying
+
+        fader = FakeFader()
+        spotify.volume = lambda: 9  # one third up a fade-in
+
+        # while the fade is ramping, the low read is refused
+        self.assertEqual(self.c.relearn_volume(cfg, fader), 75)
+        self.assertEqual(self.c._read_learned(), 75, "must not learn a mid-ramp value")
+
+        # once the fade settles at the true resting level, a real change sticks
+        fader.flying = False
+        spotify.volume = lambda: 55
+        self.assertEqual(self.c.relearn_volume(cfg, fader), 55)
+
+    def test_rapid_flip_does_not_ratchet_via_fades(self):
+        """Many pause/play flips that each catch a fade mid-ramp must leave the
+        resting volume where the user put it.
+        """
+        cfg = {"target_volume": "auto"}
+        self.c._write_learned(75)
+
+        class FakeFader:
+            def in_flight(self): return True  # always mid-fade during the burst
+
+        fader = FakeFader()
+        for v in (9, 3, 25, 1, 40, 8):  # assorted points along ramps
+            spotify.volume = lambda v=v: v
+            self.c.relearn_volume(cfg, fader)
+        self.assertEqual(self.c._read_learned(), 75,
+                         "resting volume must survive a burst of interrupted fades")
 
 
 class TestHook(unittest.TestCase):
@@ -299,11 +340,82 @@ class TestHook(unittest.TestCase):
     def test_event_mapping(self):
         from flowstate import cli
         self.assertEqual(cli.EVENT_STATE["UserPromptSubmit"], "busy")
-        self.assertEqual(cli.EVENT_STATE["Stop"], "idle")
         self.assertEqual(cli.EVENT_STATE["Notification"], "idle")
         self.assertNotIn("SubagentStop", cli.EVENT_STATE,
                          "SubagentStop carries the PARENT session_id — hooking it "
                          "would mark a live session idle whenever a subagent ended")
+        self.assertNotIn("Stop", cli.EVENT_STATE,
+                         "Stop is not a fixed mapping — it depends on background_tasks")
+
+
+class TestStopWithBackgroundWork(unittest.TestCase):
+    """A turn ending is not Claude being done.
+
+    Reported from real use: a deep-research sweep ran for many minutes, Stop
+    fired the instant it handed off to the background, the session was marked
+    idle, `busy` dropped to zero, and the music never started -- during exactly
+    the stretch where there was nothing for a human to do.
+    """
+
+    def _stop(self, tasks):
+        from flowstate import cli
+        return cli._stop_state({"hook_event_name": "Stop", "background_tasks": tasks})
+
+    def test_plain_stop_is_your_move(self):
+        st, extra = self._stop([])
+        self.assertEqual(st, "idle")
+        self.assertEqual(extra["bg"], 0)
+
+    def test_missing_field_is_your_move(self):
+        from flowstate import cli
+        st, _ = cli._stop_state({"hook_event_name": "Stop"})
+        self.assertEqual(st, "idle", "absent background_tasks must not read as busy")
+
+    def test_running_subagent_keeps_session_working(self):
+        st, extra = self._stop([
+            {"id": "a1", "type": "subagent", "status": "running",
+             "description": "Deep research sweep", "agent_type": "Explore"},
+        ])
+        self.assertEqual(st, "busy", "a running background agent means you are NOT needed")
+        self.assertEqual(extra["bg"], 1)
+        self.assertEqual(extra["bg_desc"], "Deep research sweep")
+
+    def test_completed_tasks_do_not_keep_it_working(self):
+        st, extra = self._stop([
+            {"id": "a1", "type": "subagent", "status": "completed"},
+            {"id": "a2", "type": "subagent", "status": "failed"},
+        ])
+        self.assertEqual(st, "idle")
+        self.assertEqual(extra["bg"], 0)
+
+    def test_mixed_counts_only_running(self):
+        st, extra = self._stop([
+            {"id": "a1", "status": "completed"},
+            {"id": "a2", "status": "running", "description": "still going"},
+            {"id": "a3", "status": "running", "description": "also going"},
+        ])
+        self.assertEqual(st, "busy")
+        self.assertEqual(extra["bg"], 2)
+
+    def test_background_bash_counts_too(self):
+        st, extra = self._stop([
+            {"id": "b1", "type": "bash", "status": "running", "description": "pytest -q"},
+        ])
+        self.assertEqual(st, "busy", "background shell work is work too")
+        self.assertEqual(extra["bg_desc"], "pytest -q")
+
+    def test_garbage_entries_are_survived(self):
+        for junk in ([None], ["nope"], [{}], [{"status": None}], "not-a-list"):
+            st, _ = self._stop(junk)
+            self.assertEqual(st, "idle")
+
+    def test_background_session_plays_music_alone(self):
+        """The end-to-end shape of the reported bug."""
+        s = sess("deep", "busy", 5)
+        s["bg"] = 1
+        play, reason, counts = state.decide([s], PARK, now=NOW)
+        self.assertTrue(play, "a lone session doing background work must still play music")
+        self.assertIn("background", reason)
 
 
 if __name__ == "__main__":
