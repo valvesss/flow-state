@@ -18,6 +18,15 @@ HOUR = 3600
 # lunch". Counting it would let one long lunch swamp the median.
 MAX_RESPONSE = 2 * HOUR
 
+# A `busy` span with no background work (bg==0) that runs longer than this is
+# almost certainly a stuck session -- one that went busy and never fired Stop
+# (a remote session the Mac can't pid-check, a crash without SessionEnd) -- not
+# real work. Counting it inflates busy_time wildly: one overnight stuck span can
+# be 90% of a project's total. A genuine long run has bg>0 (a subagent or
+# background shell) and is never treated as stale. Kept generous so a real long
+# single turn isn't mistaken for stuck.
+STALE_BUSY = 45 * 60
+
 
 def _pct(sorted_vals, p):
     if not sorted_vals:
@@ -65,19 +74,27 @@ def compute(since=None, park_after_s=300, now=None):
         )
         if e.get("project"):
             lanes[key]["project"] = e["project"]
-        lanes[key]["points"].append((e["ts"], e.get("to")))
+        lanes[key]["points"].append((e["ts"], e.get("to"), e.get("bg", 0)))
 
     for lane in lanes.values():
         spans, pts = [], lane["points"]
-        for i, (ts, st) in enumerate(pts):
+        for i, (ts, st, bg) in enumerate(pts):
             if st == "gone":
                 continue
             end = pts[i + 1][0] if i + 1 < len(pts) else now
             if end > ts:
-                spans.append({"start": ts, "end": end, "state": st})
+                dur = end - ts
+                stale = st == "busy" and bg == 0 and dur > STALE_BUSY
+                spans.append({"start": ts, "end": end, "state": st,
+                              "bg": bg, "stale": stale})
         lane["spans"] = spans
-        lane["busy_time"] = sum(s["end"] - s["start"] for s in spans if s["state"] == "busy")
-        lane["turns"] = sum(1 for _, st in pts if st == "busy")
+        # busy_time excludes stale spans: a stuck session was not doing work.
+        lane["busy_time"] = sum(
+            s["end"] - s["start"] for s in spans if s["state"] == "busy" and not s["stale"])
+        lane["stale_busy_time"] = sum(
+            s["end"] - s["start"] for s in spans if s["stale"])
+        lane["stale_busy_count"] = sum(1 for s in spans if s["stale"])
+        lane["turns"] = sum(1 for _, st, _ in pts if st == "busy")
         del lane["points"]
 
     # --- presence: intervals you were away (from presence events) ---------
@@ -185,6 +202,8 @@ def compute(since=None, park_after_s=300, now=None):
         "turns": sum(lane["turns"] for lane in lanes.values()),
         "sessions_seen": len(lanes),
         "away_time": away_time,
+        "stale_busy_time": sum(lane["stale_busy_time"] for lane in lanes.values()),
+        "stale_busy_count": sum(lane["stale_busy_count"] for lane in lanes.values()),
         "response": {
             "count": len(responses),
             "median": _pct(responses, 0.5),

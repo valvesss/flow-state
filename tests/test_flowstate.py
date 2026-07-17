@@ -372,6 +372,37 @@ class TestMetricsOutliersAndAway(unittest.TestCase):
         self.assertEqual(r["outliers"], 0)
         self.assertGreater(m["away_time"], 4000, "away time is reported honestly")
 
+    def test_stuck_busy_span_excluded_from_busy_time(self):
+        """The overnight bug: a session went busy and never fired Stop, so its
+        span ran for hours and inflated busy_time. bg==0 + very long = stuck."""
+        t = 10_000.0
+        stuck = metrics.STALE_BUSY + 3 * metrics.HOUR
+        self._log([
+            {"ts": t, "ev": "transition", "host": "h", "session": "a",
+             "project": "p", "from": "idle", "to": "busy", "bg": 0},
+            {"ts": t + stuck, "ev": "transition", "host": "h", "session": "a",
+             "project": "p", "from": "busy", "to": "idle", "bg": 0},
+        ])
+        m = metrics.compute(since=t - 1, park_after_s=PARK, now=t + stuck + 1)
+        self.assertEqual(m["stale_busy_count"], 1)
+        self.assertGreater(m["stale_busy_time"], 3 * metrics.HOUR)
+        self.assertEqual(m["projects"][0]["busy_time"], 0.0,
+                         "a stuck span must not count as work time")
+
+    def test_long_run_with_background_work_is_not_stale(self):
+        """A genuine long run has bg>0 and must be counted, not written off."""
+        t = 10_000.0
+        longrun = metrics.STALE_BUSY + 2 * metrics.HOUR
+        self._log([
+            {"ts": t, "ev": "transition", "host": "h", "session": "a",
+             "project": "p", "from": "idle", "to": "busy", "bg": 1},
+            {"ts": t + longrun, "ev": "transition", "host": "h", "session": "a",
+             "project": "p", "from": "busy", "to": "idle", "bg": 0},
+        ])
+        m = metrics.compute(since=t - 1, park_after_s=PARK, now=t + longrun + 1)
+        self.assertEqual(m["stale_busy_count"], 0, "bg>0 is real work, never stale")
+        self.assertGreater(m["projects"][0]["busy_time"], 2 * metrics.HOUR)
+
     def test_normal_response_still_measured(self):
         t = 10_000.0
         self._log([

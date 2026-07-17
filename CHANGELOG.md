@@ -14,6 +14,12 @@
     away for are split into their own buckets and surfaced (`outliers`,
     `away_gaps`, `p99`, `max`, `away_time`) instead of vanishing from the
     typical stats. `flow-state stats` shows what it set aside.
+  - Stuck sessions no longer inflate work time. A `busy` span with no background
+    work (`bg==0`) running longer than `STALE_BUSY` (45 min) is treated as a
+    stuck session — one that went busy and never fired Stop, which the Mac can't
+    pid-prune for a *remote* host — and excluded from `busy_time`, surfaced as
+    `stale_busy_time`/`stale_busy_count`. A genuine long run has `bg>0` and is
+    never touched.
 
 ### Added
 - **Presence gate.** flow-state inferred "you're waiting" from session state but

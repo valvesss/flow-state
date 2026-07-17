@@ -186,6 +186,10 @@ def cmd_stats(args):
     print("  %-22s %d across %d sessions" % ("turns", m["turns"], m["sessions_seen"]))
     if m.get("away_time"):
         print("  %-22s %s" % ("away from keyboard", h(m["away_time"])))
+    if m.get("stale_busy_count"):
+        print("  %-22s %s across %d stuck span%s (not counted)" % (
+            "stuck / not working", h(m["stale_busy_time"]),
+            m["stale_busy_count"], "" if m["stale_busy_count"] == 1 else "s"))
     r = m["response"]
     if r["count"]:
         print("  %-22s %s median · %s p90 · %s max (n=%d)"
