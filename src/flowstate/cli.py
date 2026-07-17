@@ -7,7 +7,7 @@ import subprocess
 import sys
 import time
 
-from . import config, conductor, events, metrics, spotify, state
+from . import conductor, config, events, metrics, spotify, state
 
 # What each hook event means about the session that fired it.
 #   Notification -- it wants permission or input. Your move.
@@ -390,8 +390,9 @@ def cmd_doctor(args):
                  "test -x ~/.flow-state/bin/flow-state && echo yes"],
                 capture_output=True, text=True, timeout=15,
             )
-            chk("remote %s" % name, rc.stdout.strip() == "yes",
-                r["ssh"] + (" ok" if rc.stdout.strip() == "yes" else " — flow-state not installed there"))
+            ok = rc.stdout.strip() == "yes"
+            chk("remote %s" % name, ok,
+                r["ssh"] + (" ok" if ok else " — flow-state not installed there"))
         except Exception as e:
             chk("remote %s" % name, False, "%s: %s" % (r["ssh"], type(e).__name__))
 

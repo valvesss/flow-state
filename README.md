@@ -1,29 +1,35 @@
-# flow-state
+<div align="center">
 
-**Music while Claude works. Silence means it's your move.**
+# 🎧 flow-state
 
-You run several Claude Code sessions at once. While they're all churning you have
-nothing to do, so flow-state fades your Spotify up. The moment *any* session
-finishes its turn — done, or parked on a background task, or asking permission —
-it fades the music down and pauses.
+### Music while Claude works. Silence means it's your move.
 
-The pause **is** the notification. You don't watch spinners; you notice the room
-go quiet.
+You run several Claude Code sessions at once. While they're all churning, you
+have nothing to do — so flow-state fades your Spotify up. The moment *any*
+session needs you, it fades the music down and pauses.
 
-It also keeps a log, so you can find out where your day actually went:
+**The pause is the notification.** You stop watching spinners and start noticing
+the room go quiet.
 
-```
-  flow-state · last 24h
+<br>
 
-  you waited on Claude   1h 07m
-  Claude waited on you   2h 12m
-  longest unbroken flow  14m 22s
-  turns                  134 across 5 sessions
-  your response time     41s median · 4m 10s p90 (n=129)
-```
+[![CI](https://github.com/valvesss/flow-state/actions/workflows/ci.yml/badge.svg)](https://github.com/valvesss/flow-state/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org)
+[![deps: none](https://img.shields.io/badge/dependencies-none-brightgreen.svg)](#what-it-doesnt-do)
+[![platform: macOS + Spotify](https://img.shields.io/badge/platform-macOS%20%2B%20Spotify-lightgrey.svg)](#install)
 
-`flow-state dash` renders that as a dashboard: every session as a lane across
-the day, banded by what it was doing, with the music track laid over the top.
+<br>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/dashboard-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/dashboard-light.png">
+  <img alt="The flow-state dashboard: stat tiles for time-in-flow and response latency, a swimlane of every session across the day, and the soundtrack that played." src="docs/dashboard-dark.png" width="820">
+</picture>
+
+<sub><code>flow-state dash</code> — every session as a lane across the day, banded by what it was doing, with the music laid over the top.</sub>
+
+</div>
 
 ---
 

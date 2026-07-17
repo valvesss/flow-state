@@ -146,7 +146,7 @@ def compute(since=None, park_after_s=300, now=None):
         "attention_time": attention_time,
         "longest_flow": longest_flow,
         "flow_blocks": [{"start": a, "end": b} for a, b in flow_blocks],
-        "turns": sum(l["turns"] for l in lanes.values()),
+        "turns": sum(lane["turns"] for lane in lanes.values()),
         "sessions_seen": len(lanes),
         "response": {
             "count": len(responses),
@@ -154,7 +154,7 @@ def compute(since=None, park_after_s=300, now=None):
             "p90": _pct(responses, 0.9),
             "total": sum(responses),
         },
-        "lanes": sorted(lanes.values(), key=lambda l: -l["busy_time"]),
+        "lanes": sorted(lanes.values(), key=lambda lane: -lane["busy_time"]),
         "projects": projects,
         "soundtrack": soundtrack,
     }

@@ -189,7 +189,8 @@ def run(once=False):
                         "music", action="play", reason=reason, volume=rest,
                         ok=ok, **counts, **np
                     )
-                    _log("play (%s) -> vol %d%s" % (reason, rest, "" if ok else " [spotify unavailable]"))
+                    _log("play (%s) -> vol %d%s"
+                         % (reason, rest, "" if ok else " [spotify unavailable]"))
                 else:
                     # Relearn before ramping to zero: this is the last moment
                     # the slider still reflects what you were listening at.
@@ -230,8 +231,9 @@ def watch(poll_ms=250, heartbeat=10):
         payload = json.dumps(
             {"sessions": sessions, "ts": time.time()}, separators=(",", ":"), sort_keys=True
         )
+        ordered = sorted(sessions, key=lambda x: x["session"])
         fingerprint = json.dumps(
-            [(s["session"], s["state"], s.get("since")) for s in sorted(sessions, key=lambda x: x["session"])],
+            [(s["session"], s["state"], s.get("since")) for s in ordered],
             sort_keys=True,
         )
         now = time.time()

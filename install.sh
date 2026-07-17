@@ -62,7 +62,8 @@ command -v python3 >/dev/null 2>&1 || { echo "python3 is required" >&2; exit 1; 
 
 echo "→ installing to $ROOT"
 mkdir -p "$ROOT"
-rm -rf "$ROOT/bin" "$ROOT/src"
+# ${ROOT:?} so an empty ROOT aborts rather than expanding to `rm -rf /bin`.
+rm -rf "${ROOT:?}/bin" "${ROOT:?}/src"
 cp -R "$SRC/bin" "$SRC/src" "$ROOT/"
 chmod +x "$ROOT/bin/flow-state"
 

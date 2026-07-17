@@ -65,8 +65,7 @@ def main():
     # purpose: it degrades to the TTL, which keeps these alive for the capture.
     os.makedirs(config.SESSIONS, exist_ok=True)
     now = time.time()
-    for name, host in [("web", "local"), ("api", "build-box"), ("infra", "build-box"),
-                       ("cli", "build-box"), ("docs", "build-box")]:
+    for name in ("web", "api", "infra", "cli", "docs"):
         with open(os.path.join(config.SESSIONS, "demo-%s.json" % name), "w") as f:
             json.dump({
                 "session": "demo-" + name, "state": "busy",

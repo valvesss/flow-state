@@ -20,7 +20,7 @@ config.SESSIONS = os.path.join(config.RUN, "sessions")
 config.EVENTS = os.path.join(_tmp, "events.jsonl")
 config.CONFIG = os.path.join(_tmp, "config.json")
 
-from flowstate import events, metrics, spotify, state  # noqa: E402
+from flowstate import metrics, spotify, state  # noqa: E402
 
 NOW = 1_000_000.0
 PARK = 300
@@ -216,7 +216,7 @@ class TestFadeScripts(unittest.TestCase):
 
     def test_fade_out_restores_resting_volume_after_pause(self):
         s = spotify.fade_out_script(70, 65, 800)
-        tail = [l.strip() for l in s.split("\n")][-4:]
+        tail = [line.strip() for line in s.split("\n")][-4:]
         self.assertIn("pause", tail)
         self.assertIn("set sound volume to 65", tail,
                       "must hand back a usable volume, not leave Spotify at 0")
