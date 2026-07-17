@@ -403,6 +403,48 @@ class TestMetricsOutliersAndAway(unittest.TestCase):
         self.assertEqual(m["stale_busy_count"], 0, "bg>0 is real work, never stale")
         self.assertGreater(m["projects"][0]["busy_time"], 2 * metrics.HOUR)
 
+    def test_the_day_partitions_the_window(self):
+        """The Kickbacks lesson: count once, no overlap. flow+waiting+away+idle
+        must equal the window, so the breakdown actually reconciles."""
+        t = 10_000.0
+        self._log([
+            {"ts": t, "ev": "transition", "host": "h", "session": "a",
+             "project": "p", "from": None, "to": "busy", "bg": 0},
+            {"ts": t + 100, "ev": "music", "action": "play"},
+            {"ts": t + 250, "ev": "transition", "host": "h", "session": "a",
+             "project": "p", "from": "busy", "to": "idle", "bg": 0},
+            {"ts": t + 250, "ev": "music", "action": "pause"},
+            {"ts": t + 900, "ev": "transition", "host": "h", "session": "a",
+             "project": "p", "from": "idle", "to": "busy", "bg": 0},
+        ])
+        now = t + 1000
+        m = metrics.compute(since=t - 1, park_after_s=PARK, now=now)
+        d = m["day"]
+        total = d["flow"] + d["waiting"] + d["away"] + d["idle"]
+        self.assertAlmostEqual(total, m["window"]["span"], places=3,
+                               msg="the four buckets must sum to the window")
+        self.assertAlmostEqual(d["flow"], 150, places=3)      # music t+100..t+250
+        self.assertAlmostEqual(d["waiting"], PARK, places=3)  # idle capped at park
+        self.assertEqual(m["flow_time"], d["flow"])
+
+    def test_project_busy_is_wallclock_union_not_personseconds(self):
+        """Two sessions of one project, busy at the same time, = one wall-clock
+        minute of work, not two."""
+        t = 10_000.0
+        self._log([
+            {"ts": t, "ev": "transition", "host": "h", "session": "a",
+             "project": "p", "from": "idle", "to": "busy", "bg": 0},
+            {"ts": t, "ev": "transition", "host": "h", "session": "b",
+             "project": "p", "from": "idle", "to": "busy", "bg": 0},
+            {"ts": t + 60, "ev": "transition", "host": "h", "session": "a",
+             "project": "p", "from": "busy", "to": "idle", "bg": 0},
+            {"ts": t + 60, "ev": "transition", "host": "h", "session": "b",
+             "project": "p", "from": "busy", "to": "idle", "bg": 0},
+        ])
+        m = metrics.compute(since=t - 1, park_after_s=PARK, now=t + 200)
+        self.assertAlmostEqual(m["projects"][0]["busy_time"], 60, places=3,
+                               msg="concurrent sessions must not double-count wall-clock")
+
     def test_normal_response_still_measured(self):
         t = 10_000.0
         self._log([

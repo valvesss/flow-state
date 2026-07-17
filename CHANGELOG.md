@@ -22,6 +22,15 @@
     never touched.
 
 ### Added
+- **The day reconciles.** Metrics were three overlapping measures on one
+  timeline that didn't add up — flow + attention + away left ~60% of the window
+  unaccounted for. Borrowing the count-once discipline behind ad-impression
+  accounting, the window is now partitioned into four mutually-exclusive slices
+  — **in flow / waiting on you / away / idle** — that sum to 100%. `flow-state
+  stats` and the dashboard show it as a single bar. Per-project time is now
+  **wall-clock (union of a project's busy spans), expressed as a share of the
+  window**, instead of person-seconds that double-counted concurrent sessions
+  and answered a different question than the headline.
 - **Presence gate.** flow-state inferred "you're waiting" from session state but
   never checked whether a human was actually there — so a run grinding overnight
   played music (and counted as flow) to an empty room while the user slept, for

@@ -28,6 +28,18 @@ MAX_RESPONSE = 2 * HOUR
 STALE_BUSY = 45 * 60
 
 
+def _merge(intervals):
+    """Union of [start, end) intervals, so overlapping/concurrent spans count as
+    wall-clock once."""
+    out = []
+    for a, b in sorted(intervals):
+        if out and a <= out[-1][1]:
+            out[-1][1] = max(out[-1][1], b)
+        else:
+            out.append([a, b])
+    return out
+
+
 def _pct(sorted_vals, p):
     if not sorted_vals:
         return 0.0
@@ -143,10 +155,20 @@ def compute(since=None, park_after_s=300, now=None):
     responses.sort()
     outliers.sort()
 
-    # --- attention time: sweep with synthetic park boundaries -------------
-    # A session parks mid-interval (park_after_s after it went idle), so park
-    # moments must be sweep points too or the arithmetic silently drifts.
+    # --- the day, partitioned -------------------------------------------
+    # One timeline, each instant classified into exactly one state, so the
+    # pieces sum to the window instead of being three overlapping measures that
+    # don't add up. Precedence away > flow > waiting > idle makes it a true
+    # partition (idempotent, count-once -- the discipline borrowed from how ad
+    # impressions are accounted). Sweep at every boundary, including the park
+    # moment inside each idle span, or the arithmetic drifts.
     marks = {window_start, now}
+    for a, b in flow_blocks:
+        marks.add(a)
+        marks.add(b)
+    for a, b in away_intervals:
+        marks.add(a)
+        marks.add(b)
     for lane in lanes.values():
         for s in lane["spans"]:
             marks.add(s["start"])
@@ -157,21 +179,28 @@ def compute(since=None, park_after_s=300, now=None):
                     marks.add(p)
     marks = sorted(m for m in marks if window_start <= m <= now)
 
-    attention_time = 0.0
-    for i in range(len(marks) - 1):
-        a, b = marks[i], marks[i + 1]
-        mid = (a + b) / 2
-        waiting = False
+    def _in(intervals, t):
+        return any(x <= t < y for x, y in intervals)
+
+    def _waiting_at(t):
         for lane in lanes.values():
             for s in lane["spans"]:
-                if s["start"] <= mid < s["end"] and s["state"] == "idle":
-                    if mid - s["start"] < park_after_s:
-                        waiting = True
-                        break
-            if waiting:
-                break
-        if waiting:
-            attention_time += b - a
+                if (s["state"] == "idle" and s["start"] <= t < s["end"]
+                        and t - s["start"] < park_after_s):
+                    return True
+        return False
+
+    day = {"flow": 0.0, "waiting": 0.0, "away": 0.0, "idle": 0.0}
+    for a, b in zip(marks, marks[1:]):
+        mid = (a + b) / 2
+        if _in(away_intervals, mid):
+            day["away"] += b - a
+        elif _in(flow_blocks, mid):
+            day["flow"] += b - a
+        elif _waiting_at(mid):
+            day["waiting"] += b - a
+        else:
+            day["idle"] += b - a
 
     # --- soundtrack -------------------------------------------------------
     tracks = {}
@@ -184,19 +213,38 @@ def compute(since=None, park_after_s=300, now=None):
         for (t, a), n in sorted(tracks.items(), key=lambda kv: -kv[1])
     ]
 
-    # --- projects ---------------------------------------------------------
-    projects = {}
+    # --- projects: wall-clock, not person-seconds -------------------------
+    # A project's busy_time is the UNION of its sessions' busy spans, not their
+    # sum. Summing double-counts wall-clock when sessions run concurrently (five
+    # sessions busy for a minute is one minute of work on that project, not
+    # five), which made the per-project total answer a different question than
+    # the headline. `share` expresses it as a fraction of the window, so it's
+    # directly comparable. Shares across projects can exceed 100% -- two
+    # projects genuinely can be worked at once -- but each number is honest.
+    span = now - window_start
+    agg = {}
+    intervals = {}
     for lane in lanes.values():
         p = lane["project"] or "(unknown)"
-        d = projects.setdefault(p, {"project": p, "turns": 0, "busy_time": 0.0})
-        d["turns"] += lane["turns"]
-        d["busy_time"] += lane["busy_time"]
-    projects = sorted(projects.values(), key=lambda d: -d["busy_time"])
+        agg.setdefault(p, {"project": p, "turns": 0})["turns"] += lane["turns"]
+        intervals.setdefault(p, []).extend(
+            (s["start"], s["end"]) for s in lane["spans"]
+            if s["state"] == "busy" and not s["stale"])
+    projects = []
+    for p, d in agg.items():
+        wall = sum(b - a for a, b in _merge(intervals[p]))
+        projects.append({**d, "busy_time": wall, "share": wall / span if span else 0.0})
+    projects.sort(key=lambda d: -d["busy_time"])
 
     return {
-        "window": {"start": window_start, "end": now, "span": now - window_start},
-        "flow_time": flow_time,
-        "attention_time": attention_time,
+        "window": {"start": window_start, "end": now, "span": span},
+        # The four add up to the window (idempotent partition), so the day
+        # reconciles. flow_time is now music-actually-playing minus any away.
+        "flow_time": day["flow"],
+        "attention_time": day["waiting"],
+        "idle_time": day["idle"],
+        "day": day,
+        "music_time": flow_time,  # raw music-on time, kept for the swimlane
         "longest_flow": longest_flow,
         "flow_blocks": [{"start": a, "end": b} for a, b in flow_blocks],
         "turns": sum(lane["turns"] for lane in lanes.values()),

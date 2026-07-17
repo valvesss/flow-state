@@ -179,13 +179,21 @@ def cmd_stats(args):
         return 0
 
     h = metrics.human
+    span = m["window"]["span"] or 1
+    d = m["day"]
     print("\n  flow-state · last %s\n" % (args.since if args.since != "all" else "everything"))
-    print("  %-22s %s" % ("you waited on Claude", h(m["flow_time"])))
-    print("  %-22s %s" % ("Claude waited on you", h(m["attention_time"])))
+    # The day, partitioned — these four add up to 100%.
+    print("  the day (%s)" % h(span))
+    for label, key in (("in flow (music on)", "flow"), ("waiting on you", "waiting"),
+                       ("away", "away"), ("idle / nothing running", "idle")):
+        secs = d[key]
+        if secs <= 0:
+            continue
+        bar = "█" * round(secs / span * 24)
+        print("    %-22s %-9s %4.0f%%  %s" % (label, h(secs), secs / span * 100, bar))
+    print()
     print("  %-22s %s" % ("longest unbroken flow", h(m["longest_flow"])))
     print("  %-22s %d across %d sessions" % ("turns", m["turns"], m["sessions_seen"]))
-    if m.get("away_time"):
-        print("  %-22s %s" % ("away from keyboard", h(m["away_time"])))
     if m.get("stale_busy_count"):
         print("  %-22s %s across %d stuck span%s (not counted)" % (
             "stuck / not working", h(m["stale_busy_time"]),
@@ -205,9 +213,10 @@ def cmd_stats(args):
         if notes:
             print("  %-22s set aside: %s" % ("", " · ".join(notes)))
     if m["projects"]:
-        print("\n  by project")
+        print("\n  by project (wall-clock, % of window)")
         for p in m["projects"][:6]:
-            print("    %-24s %-9s %d turns" % (p["project"][:24], h(p["busy_time"]), p["turns"]))
+            print("    %-22s %-9s %4.0f%%  %d turns" % (
+                p["project"][:22], h(p["busy_time"]), p.get("share", 0) * 100, p["turns"]))
     if m["soundtrack"]:
         print("\n  soundtrack")
         for t in m["soundtrack"][:6]:
