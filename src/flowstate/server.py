@@ -46,6 +46,13 @@ class Handler(BaseHTTPRequestHandler):
             with open(os.path.join(HERE, "dashboard.html"), "rb") as f:
                 return self._send(200, f.read(), "text/html; charset=utf-8")
 
+        if u.path == "/logo.svg":
+            try:
+                with open(os.path.join(HERE, "logo.svg"), "rb") as f:
+                    return self._send(200, f.read(), "image/svg+xml")
+            except OSError:
+                return self._send(404, "no logo", "text/plain")
+
         if u.path == "/api/stats":
             qs = parse_qs(u.query)
             cfg = config.load()

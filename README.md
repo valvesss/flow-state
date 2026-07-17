@@ -1,6 +1,8 @@
 <div align="center">
 
-# 🎧 flow-state
+<img src="docs/logo.svg" alt="flow-state" width="132">
+
+# flow-state
 
 ### Music while Claude works. Silence means it's your move.
 

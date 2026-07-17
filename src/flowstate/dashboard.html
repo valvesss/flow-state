@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>flow-state</title>
+<link rel="icon" type="image/svg+xml" href="/logo.svg">
 <style>
   /* Palette roles. Dark values are selected for the dark surface, not flipped. */
   :root {
@@ -56,7 +57,8 @@
   }
   .wrap { max-width: 1080px; margin: 0 auto; padding: 32px 24px 64px; }
 
-  header { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 4px; }
+  header { display: flex; align-items: center; gap: 11px; flex-wrap: wrap; margin-bottom: 4px; }
+  .logo { display: block; flex: none; }
   h1 { font-size: 19px; font-weight: 620; margin: 0; letter-spacing: -0.01em; }
   h1 .dot { color: var(--ink-muted); font-weight: 400; }
   .tagline { color: var(--ink-muted); font-size: 13px; margin: 0 0 24px; }
@@ -184,6 +186,7 @@
 <body>
 <div class="wrap">
   <header>
+    <img src="/logo.svg" alt="" class="logo" width="46" height="34">
     <h1>flow-state <span class="dot">·</span></h1>
     <div class="live" id="live"><span class="beacon"></span><span>—</span></div>
   </header>
