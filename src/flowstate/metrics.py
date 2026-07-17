@@ -248,7 +248,9 @@ def compute(since=None, park_after_s=300, now=None):
         "longest_flow": longest_flow,
         "flow_blocks": [{"start": a, "end": b} for a, b in flow_blocks],
         "turns": sum(lane["turns"] for lane in lanes.values()),
-        "sessions_seen": len(lanes),
+        # sessions that actually did a turn; ephemeral idle->gone ones (the
+        # SSH-bridge spawns many) would otherwise inflate the count.
+        "sessions_seen": sum(1 for lane in lanes.values() if lane["turns"] > 0),
         "away_time": away_time,
         "stale_busy_time": sum(lane["stale_busy_time"] for lane in lanes.values()),
         "stale_busy_count": sum(lane["stale_busy_count"] for lane in lanes.values()),

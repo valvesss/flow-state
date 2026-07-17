@@ -121,6 +121,8 @@
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .lane-label small { color: var(--ink-muted); }
+  .swim-note { margin: 8px 0 0 128px; font-size: 12px; color: var(--ink-muted); }
+  @media (max-width: 860px) { .swim-note { margin-left: 84px; } }
   .track {
     position: relative; flex: 1; height: 22px; border-radius: 5px;
     background: linear-gradient(var(--grid), var(--grid)) 0 50%/100% 1px no-repeat;
@@ -351,7 +353,17 @@ function renderSwim(m) {
         style="left:${pct(b.start)}%;width:${Math.max(pct(b.end) - pct(b.start), 0.25)}%"></div>`
     ).join('') + '</div></div>';
 
-  for (const lane of m.lanes) {
+  // Only lanes that did real work (a busy turn). The SSH-bridge spawns many
+  // ephemeral sessions that only ever go idle->gone; a lane each would bury the
+  // real ones under dozens of empty rows. Cap the rest and say what's hidden --
+  // never truncate silently.
+  const active = m.lanes.filter(l => l.turns > 0);
+  const CAP = 12;
+  const shown = active.slice(0, CAP);
+  const hiddenIdle = m.lanes.length - active.length;
+  const hiddenOverflow = active.length - shown.length;
+
+  for (const lane of shown) {
     const label = lane.project || lane.session.slice(0, 8);
     html += `<div class="lane">
       <div class="lane-label" title="${esc(lane.host + '/' + lane.session)}">${esc(label)}
@@ -374,6 +386,12 @@ function renderSwim(m) {
           style="left:${pct(a)}%;width:${Math.max(pct(b) - pct(a), 0.2)}%"></div>`;
       }).join('') + '</div></div>';
   }
+
+  const notes = [];
+  if (hiddenOverflow > 0) notes.push(`${hiddenOverflow} more with activity`);
+  if (hiddenIdle > 0) notes.push(`${hiddenIdle} short-lived (no work)`);
+  if (notes.length) html += `<div class="swim-note">+ ${notes.join(' · ')} hidden</div>`;
+  if (!shown.length) html = '<div class="empty">No sessions did work in this window.</div>';
   el.innerHTML = html;
 
   const NAMES = {busy: 'Working', idle: 'Waiting on you', parked: 'Parked'};
@@ -386,7 +404,7 @@ function renderSwim(m) {
   $('#lane-table').innerHTML =
     '<tr><td class="tr-nm"><b>Session</b></td><td class="tr-ar"><b>Host</b></td>' +
     '<td class="tr-n"><b>Turns</b></td><td class="tr-n"><b>Working</b></td></tr>' +
-    m.lanes.map(l => `<tr>
+    active.map(l => `<tr>
       <td class="tr-nm">${esc(l.project || l.session.slice(0, 8))}</td>
       <td class="tr-ar">${esc(l.host)}</td>
       <td class="tr-n">${l.turns}</td>

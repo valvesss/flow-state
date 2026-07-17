@@ -21,6 +21,13 @@
     `stale_busy_time`/`stale_busy_count`. A genuine long run has `bg>0` and is
     never touched.
 
+### Fixed
+- **Swimlane no longer buried under empty lanes.** The SSH-bridge spawns many
+  ephemeral sessions that only ever go `idle->gone`; each got its own lane,
+  drowning the real ones under dozens of blank rows. The timeline now shows only
+  sessions that did a turn (capped, with a "+N hidden" note — never silent), and
+  `sessions_seen` counts working sessions, not every registration.
+
 ### Added
 - **The day reconciles.** Metrics were three overlapping measures on one
   timeline that didn't add up — flow + attention + away left ~60% of the window
