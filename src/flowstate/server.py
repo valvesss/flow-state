@@ -76,6 +76,39 @@ class Handler(BaseHTTPRequestHandler):
 
         self._send(404, "not found", "text/plain")
 
+    def do_POST(self):
+        u = urlparse(self.path)
+        if u.path == "/api/enabled":
+            # The big on/off switch. Writes the same `enabled` flag `flow-state
+            # on/off` sets; the conductor reads it on its next poll and either
+            # takes over the slider or leaves Spotify entirely alone.
+            try:
+                length = int(self.headers.get("Content-Length", 0) or 0)
+                body = json.loads(self.rfile.read(length) or b"{}")
+                enabled = bool(body["enabled"])
+            except (ValueError, KeyError, json.JSONDecodeError):
+                return self._send(
+                    400, '{"error":"expected {\\"enabled\\": bool}"}',
+                    "application/json; charset=utf-8")
+            cfg = config.load()
+            cfg["enabled"] = enabled
+            config.save(cfg)
+            return self._send(
+                200, json.dumps({"enabled": enabled}),
+                "application/json; charset=utf-8")
+        self._send(404, "not found", "text/plain")
+
+
+def serve_background(port=7777):
+    """Start the dashboard + control server on a daemon thread and return it.
+
+    Used by the conductor so the panel is up for the whole life of the daemon.
+    Raises OSError if the port is taken -- the caller decides whether that is
+    fatal (it isn't, for the conductor)."""
+    srv = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv
+
 
 def serve(port=7777, open_browser=True):
     srv = ThreadingHTTPServer(("127.0.0.1", port), Handler)

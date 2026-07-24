@@ -154,9 +154,26 @@ def _diff(prev, cur):
             yield s, s.get("state"), "gone"
 
 
+def _start_panel(cfg):
+    """Serve the dashboard + on/off control from inside the daemon, so the panel
+    is reachable whenever the conductor is up -- that is the whole point of a
+    web control surface. Loopback only. A bind failure (port already taken by a
+    standalone `flow-state dash`) must never take the conductor down: the music
+    matters more than the panel."""
+    from . import server
+    port = cfg.get("dashboard_port", 7777)
+    try:
+        server.serve_background(port)
+        _log("panel -> http://127.0.0.1:%d/" % port)
+    except OSError as e:
+        _log("panel not started (port %d in use?): %s" % (port, e))
+
+
 def run(once=False):
     cfg = config.load()
     fader = spotify.Fader()
+    if not once:
+        _start_panel(cfg)
 
     watchers = []
     for r in cfg.get("remotes", []):
@@ -178,6 +195,9 @@ def run(once=False):
     away = None            # our belief about whether the human has stepped away
     idle_s = 0             # last HID idle reading
     idle_checked_at = 0.0  # throttle: reading ioreg every poll is wasteful
+    user_override = False  # you paused Spotify yourself; leave it be until you play
+    player_st = None       # last Spotify player_state reading
+    st_checked_at = 0.0    # throttle: one AppleScript per poll is wasteful
 
     try:
         while True:
@@ -198,6 +218,7 @@ def run(once=False):
                 continue
             if last_enabled is False:
                 _log("enabled")
+                user_override = False  # a fresh on is a clean slate
             last_enabled = True
 
             sessions = state.read_all(host="local")
@@ -245,6 +266,28 @@ def run(once=False):
             if gone:
                 play = False
                 reason = "you're away (idle %s)" % metrics.human(idle_s)
+
+            # Manual-pause respect. If you reach over and pause Spotify yourself
+            # -- a phone call comes in -- flow-state must not fight you back to
+            # playing the moment a session goes busy again. So: when we believe
+            # we're driving playback but Spotify reads paused, that pause was
+            # you. We back off and hold until *you* press play again. The read
+            # is throttled; a second or two of latency to notice is fine.
+            if now_t - st_checked_at >= 1:
+                player_st = spotify.player_state()
+                st_checked_at = now_t
+            if playing and player_st == "paused":
+                user_override = True
+                playing = False  # we no longer hold playback; skip our own fade
+                events.emit("music", action="pause", reason="you paused it")
+                _log("you paused — backing off until you play again")
+            elif user_override and player_st == "playing":
+                user_override = False
+                events.emit("music", action="resume", reason="you resumed")
+                _log("you resumed — flow-state has the slider again")
+            if user_override:
+                play = False
+                reason = "you paused it"
 
             if play != playing:
                 rest = resting_volume(cfg)

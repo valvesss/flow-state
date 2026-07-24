@@ -283,6 +283,21 @@ def cmd_set(args):
 
 def cmd_dash(args):
     from . import server
+    import urllib.request
+    import webbrowser
+
+    url = "http://127.0.0.1:%d/" % args.port
+    # The conductor now serves the panel itself, so it's usually already up on
+    # this port. Don't fight it for the bind -- just open the browser at the
+    # running instance. Only stand up a standalone server when nothing answers.
+    try:
+        urllib.request.urlopen(url, timeout=0.6).read(1)
+        print("flow-state dashboard (via conductor) -> %s" % url)
+        if not args.no_open:
+            webbrowser.open(url)
+        return 0
+    except Exception:
+        pass
     server.serve(port=args.port, open_browser=not args.no_open)
     return 0
 

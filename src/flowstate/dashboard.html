@@ -58,6 +58,31 @@
   .wrap { max-width: 1080px; margin: 0 auto; padding: 32px 24px 64px; }
 
   header { display: flex; align-items: center; gap: 11px; flex-wrap: wrap; margin-bottom: 4px; }
+
+  /* The big on/off switch. This is the escape hatch: one click and the
+     conductor lets go of Spotify entirely, no CLI needed. */
+  .power {
+    margin-left: auto; display: inline-flex; align-items: center; gap: 9px;
+    padding: 7px 14px 7px 8px; border: 1px solid var(--hairline);
+    border-radius: 999px; background: var(--surface); color: var(--ink-2);
+    font: inherit; font-weight: 600; cursor: pointer; box-shadow: var(--shadow);
+    transition: color .15s, border-color .15s;
+  }
+  .power:hover { border-color: var(--baseline); }
+  .power:disabled { opacity: .5; cursor: progress; }
+  .power .track {
+    position: relative; width: 40px; height: 22px; border-radius: 999px;
+    background: var(--parked); transition: background .18s;
+  }
+  .power .track::after {
+    content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px;
+    border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.35);
+    transition: transform .18s;
+  }
+  .power[aria-pressed="true"] { color: var(--busy); }
+  .power[aria-pressed="true"] .track { background: var(--busy); }
+  .power[aria-pressed="true"] .track::after { transform: translateX(18px); }
+  .power .plabel { min-width: 2.2em; text-align: left; }
   .logo { display: block; flex: none; }
   h1 { font-size: 19px; font-weight: 620; margin: 0; letter-spacing: -0.01em; }
   h1 .dot { color: var(--ink-muted); font-weight: 400; }
@@ -226,6 +251,10 @@
     <img src="/logo.svg" alt="" class="logo" width="46" height="34">
     <h1>flow-state <span class="dot">·</span></h1>
     <div class="live" id="live"><span class="beacon"></span><span>—</span></div>
+    <button id="power" class="power" aria-pressed="true" disabled
+            title="Turn flow-state on or off. Off leaves Spotify entirely alone.">
+      <span class="track"></span><span class="plabel">—</span>
+    </button>
   </header>
   <p class="tagline">Music while Claude works. Silence means it's your move.</p>
 
@@ -482,8 +511,32 @@ function renderNow(m) {
   </div>`;
 }
 
+const power = $('#power');
+function setPower(on) {
+  power.setAttribute('aria-pressed', String(on));
+  power.querySelector('.plabel').textContent = on ? 'on' : 'off';
+  power.disabled = false;
+}
+power.addEventListener('click', async () => {
+  const next = power.getAttribute('aria-pressed') !== 'true';
+  power.disabled = true;
+  try {
+    const r = await fetch('/api/enabled', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({enabled: next}),
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const j = await r.json();
+    setPower(!!j.enabled);
+    load();  // pull fresh state so the beacon and tiles agree with the switch
+  } catch (e) {
+    power.disabled = false;  // leave the switch where it was; the poll will correct it
+  }
+});
+
 function renderLive(m) {
   const n = m.now || {}, el = $('#live');
+  if (typeof n.enabled === 'boolean') setPower(n.enabled);
   let cls = 'beacon', txt;
   if (!n.enabled) { txt = '<b>Off</b><span class="t">flow-state off</span>'; }
   else if (n.play) {
